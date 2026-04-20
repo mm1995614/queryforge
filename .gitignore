@@ -28,3 +28,6 @@ eval/results/*.json
 # OS
 .DS_Store
 Thumbs.db
+
+# Assessment PDF
+*.pdf

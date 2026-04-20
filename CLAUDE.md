@@ -161,6 +161,29 @@ Target: all three models > 85% (≥ 26/30 cases fully correct).
 
 ---
 
+## README Write-up Requirements (Must Complete)
+
+The assessment explicitly requires these three sections in README.md under Part 2. Update them **during and after** the eval pipeline is run — do not leave as placeholders at submission.
+
+**Model Selection**
+- Why these 3 models were chosen
+- Why they were capable of hitting >85% accuracy
+- Trade-offs considered (cost, capability, open vs closed)
+
+**Performance**
+- Accuracy numbers for each model
+- What patterns each model initially got wrong
+- How prompt iteration improved results
+
+**Learnings**
+- What was learned about eval design
+- What was learned about building ground truth for structured outputs
+- Any surprising findings
+
+Whenever eval results change or prompts are iterated, update the Results table and these three sections in README.md immediately.
+
+---
+
 ## Common Pitfalls
 
 - NHTSA make/model values are strict — always uppercase in API calls
