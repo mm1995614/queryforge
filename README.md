@@ -144,39 +144,40 @@ The tool was tested against four categories of adversarial inputs. Results below
 
 #### Typos
 
+Typos test whether the LLM can infer the correct make/model/year even when the input contains spelling mistakes or character substitutions.
+
 | Input | Observed Behavior |
 |-------|------------------|
 | `"toyta cmary 2020 recall"` | ✅ LLM correctly normalized to TOYOTA CAMRY, query succeeded |
-| `"Hond Civ1c 2O19 的投訴"` | ✅ LLM correctly normalized to HONDA CIVIC 2019, query succeeded |
+| `"Hond Civ1c 2O19 的投訴"` | ✅ LLM correctly normalized to HONDA CIVIC 2019 despite digit/letter confusion and Chinese keyword |
 
 #### Ambiguous Inputs
 
-| Input | Observed Behavior |
-|-------|------------------|
-| `"Toyota Camry recalls"` (no year) | ❌ LLM returned `year: null`, client sent `modelYear=null` to API → 400 error |
-| `"2020 Camry recalls"` (no make) | ⚠️ LLM inferred TOYOTA from model name and returned results — silent assumption, no warning to user |
-| `"Toyota Camry 2027 recalls"` (future year) | ❌ API returned 400 error — no graceful handling |
-| `"1965 Ford Mustang safety rating"` (pre-API era) | ✅ API returned empty results, displayed gracefully |
-| `"Toyota Camry 2020 brake recalls only"` (component filter) | ⚠️ Returned all recalls without filtering — component-level filtering not supported by NHTSA API |
-| `"那台 Accord 有什麼問題？"` (no year, Chinese) | ❌ LLM returned Chinese error message, but terminal displayed garbled text due to Windows encoding (cp950) |
+Ambiguous inputs are queries where required information is missing or unclear, forcing the LLM to either infer, ask for clarification, or return an error.
+
+| Input | Ambiguity | Observed Behavior |
+|-------|-----------|------------------|
+| `"Toyota Camry recalls"` | No year specified | ❌ LLM returned `year: null`, client sent `modelYear=null` to API → 400 error instead of clean `missing_year` error |
+| `"2020 Camry recalls"` | No make specified | ⚠️ LLM silently inferred TOYOTA from model name and returned results — no warning to user that an assumption was made |
+| `"那台 Accord 有什麼問題？"` | No year, vague reference ("that") | ❌ LLM returned Chinese error message but terminal displayed garbled text due to Windows encoding (cp950) |
 
 #### Conflicting Constraints
 
-| Input | Observed Behavior |
-|-------|------------------|
-| `"Which SUVs have the most recalls in 2022?"` | ❌ LLM produced empty make/model, API returned 400 error instead of a clean out_of_scope message |
-| `"Best and worst safety rated car in 2022"` | ✅ Returned no results — silent failure, no out_of_scope error |
-| `"2022年最安全的車是哪台？"` | ✅ Returned no results — same silent failure |
+Conflicting constraints are queries where the user provides contradictory requirements, making it impossible to produce a single unambiguous structured query.
+
+| Input | Conflict | Observed Behavior |
+|-------|----------|------------------|
+| `"Toyota Camry 2019 and 2020 recalls"` | Two years — API accepts only one | ⚠️ LLM silently chose 2019, ignored 2020 — no indication to user that data for 2020 was dropped |
+| `"Honda or Toyota Camry 2020 recalls"` | Two makes — API accepts only one | ⚠️ LLM silently chose TOYOTA, ignored HONDA — same silent resolution |
+| `"Show me both recalls and safety ratings for Toyota Camry 2020"` | Two endpoints — API handles only one per request | ❌ LLM returned unexpected structure, caused application crash |
 
 #### Languages Other Than English (Traditional Chinese)
 
 | Input | Observed Behavior |
 |-------|------------------|
 | `"Toyota Camry 2020 有哪些召回問題"` | ✅ Correctly identified as recalls query, returned results |
-| `"Toyota Camry 2020 煞車召回"` | ⚠️ Returned all recalls — component filter not supported |
-| `"那台 Accord 有什麼問題？"` | ❌ Error message garbled on Windows terminal |
-| `"2022年最安全的車是哪台？"` | ⚠️ Silent failure — no results, no explanation |
-| `"Hond Civ1c 2O19 的投訴"` | ✅ Typo corrected, correct results returned |
+| `"2019 Honda Civic 消費者投訴"` | ✅ Correctly identified as complaints query, returned 355 results |
+| `"那台 Accord 有什麼問題？"` | ❌ Missing year error message returned in Chinese but garbled on Windows terminal (cp950 encoding) |
 
 ---
 
