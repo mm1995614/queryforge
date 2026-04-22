@@ -1,10 +1,10 @@
 import json
-import anthropic
+from groq import Groq
 from dotenv import load_dotenv
 
 load_dotenv()
 
-_client = anthropic.Anthropic()
+_client = Groq()
 
 SYSTEM_PROMPT = """You are a query parser for the NHTSA (National Highway Traffic Safety Administration) vehicle safety database.
 
@@ -37,31 +37,15 @@ Rules:
 9. Handle English, Traditional Chinese, and Simplified Chinese input.
 10. Write the message in the same language as the input query."""
 
-_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "endpoint": {"type": "string"},
-        "make": {"type": "string"},
-        "model": {"type": "string"},
-        "year": {"type": "string"},
-        "error": {"type": "string"},
-        "message": {"type": "string"},
-    },
-    "additionalProperties": False,
-}
-
 
 def generate_query(nl_input: str) -> dict:
-    response = _client.messages.create(
-        model="claude-sonnet-4-6",
+    response = _client.chat.completions.create(
+        model="llama-3.3-70b-versatile",
         max_tokens=256,
-        system=[{
-            "type": "text",
-            "text": SYSTEM_PROMPT,
-            "cache_control": {"type": "ephemeral"},
-        }],
-        messages=[{"role": "user", "content": nl_input}],
-        output_config={"format": {"type": "json_schema", "schema": _SCHEMA}},
+        response_format={"type": "json_object"},
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": nl_input},
+        ],
     )
-    text = next(b.text for b in response.content if b.type == "text")
-    return json.loads(text)
+    return json.loads(response.choices[0].message.content)

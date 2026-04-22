@@ -22,7 +22,7 @@ A CLI tool that translates natural language into structured [NHTSA](https://www.
 |-----------|-----------|
 | Language | Python 3.12 |
 | CLI framework | Typer + Rich |
-| Query generation | Claude Sonnet 4.6 (Anthropic) |
+| Query generation | Llama 3.3 70B (Groq, free tier) |
 | Data source | NHTSA Public API (no auth required) |
 | Eval models | Claude Sonnet 4.6, GPT-4o-mini, Llama 3.3 70B (Groq) |
 
@@ -119,49 +119,76 @@ User Input (natural language, English or Chinese)
 
 ---
 
-## Part 1: Failure Case Analysis
+## Part 1: Build a Tool, Break It, and Harden It
 
-### Documented Failure Cases
+**Domain:** NHTSA (National Highway Traffic Safety Administration) Public API — chosen because it is free, requires no authentication, and covers three distinct vehicle safety datasets (recalls, complaints, safety ratings) directly relevant to automotive industry workflows.
 
-| Category | Example Input | Observed Behavior | Severity |
-|----------|--------------|-------------------|----------|
-| Typo in make | `"Toyata Camry 2020 recalls"` | LLM sometimes corrects, occasionally hallucinates wrong make | Low |
-| Missing year | `"Toyota Camry recalls"` | Returns `error: missing_year` — handled | Low |
-| Missing make | `"2020 Camry recalls"` | LLM infers Toyota in most cases; sometimes ambiguous | Medium |
-| Ambiguous model name | `"Civic complaints 2019"` | Correct — Honda is strongly implied; may fail for less-known brands | Low |
-| Future model year | `"Toyota Camry 2027 recalls"` | Query executes, NHTSA returns empty results — no crash | Low |
-| Non-automotive query | `"What is the weather in Tokyo?"` | Returns `error: out_of_scope` — handled | Low |
-| Very old vehicles (pre-1980) | `"1965 Ford Mustang safety rating"` | API returns no data; gracefully returns empty | Low |
-| Conflicting constraints | `"Best and worst safety rated car in 2022"` | Out of scope — NHTSA API requires specific make/model | High |
-| Vague component filter | `"Toyota Camry 2020 engine problems"` | Passes as complaints query; component filtering not supported by API | Medium |
+**Languages tested:** English and Traditional Chinese
 
-### Fixed Cases
+---
 
-- **Typo correction** — System prompt explicitly instructs the LLM to normalize common make/model typos before generating the query.
-- **Missing year** — Explicit `missing_year` error returned with a human-readable message; no silent failure.
-- **Non-English input** — LLM handles natively; no pre-translation step needed.
-- **Casing issues** — Client layer normalizes all make/model params to uppercase before calling NHTSA, decoupling LLM output from API casing requirements.
-- **Out-of-scope queries** — Explicit `out_of_scope` error with explanation rather than a malformed API call.
+### Requirement 1 — Baseline Execution
 
-### Remaining Hard Cases
+The CLI accepts a natural language query, passes it to an LLM (Llama 3.3 70B via Groq) which outputs a strict JSON structured query, executes that query against the NHTSA Public API, and displays the results in the terminal using Rich.
 
-**1. Ambiguous make inference from model name alone**
+```bash
+python cli.py "Show me recalls for Toyota Camry 2020"
+python cli.py "Toyota Camry 2020 有哪些召回問題"
+```
 
-> Input: `"What are the issues with the Accord?"` (no make specified)
+---
 
-The LLM correctly infers Honda in this case because "Accord" is strongly associated with one brand. However, for models shared across brands (e.g., "Ranger" — Ford and Mitsubishi), inference is unreliable. This is fundamentally hard because it requires world knowledge about which brand is most likely given regional context, and that distribution is not static.
+### Requirement 2 — Break It
 
-**2. Comparative or aggregate queries**
+The tool was tested against four categories of adversarial inputs. Results below reflect actual observed behavior.
 
-> Input: `"Which SUVs have the most recalls in 2022?"`
+#### Typos
 
-NHTSA's API is lookup-based, not query-based. It requires a specific make and model. Answering comparative questions would require iterating over all makes and models — potentially thousands of API calls. This is an architectural limitation of the data source, not the LLM.
+| Input | Observed Behavior |
+|-------|------------------|
+| `"toyta cmary 2020 recall"` | ✅ LLM correctly normalized to TOYOTA CAMRY, query succeeded |
+| `"Hond Civ1c 2O19 的投訴"` | ✅ LLM correctly normalized to HONDA CIVIC 2019, query succeeded |
 
-**3. Component-level filtering**
+#### Ambiguous Inputs
 
-> Input: `"Toyota Camry 2020 brake recalls only"`
+| Input | Observed Behavior |
+|-------|------------------|
+| `"Toyota Camry recalls"` (no year) | ❌ LLM returned `year: null`, client sent `modelYear=null` to API → 400 error |
+| `"2020 Camry recalls"` (no make) | ⚠️ LLM inferred TOYOTA from model name and returned results — silent assumption, no warning to user |
+| `"Toyota Camry 2027 recalls"` (future year) | ❌ API returned 400 error — no graceful handling |
+| `"1965 Ford Mustang safety rating"` (pre-API era) | ✅ API returned empty results, displayed gracefully |
+| `"Toyota Camry 2020 brake recalls only"` (component filter) | ⚠️ Returned all recalls without filtering — component-level filtering not supported by NHTSA API |
+| `"那台 Accord 有什麼問題？"` (no year, Chinese) | ❌ LLM returned Chinese error message, but terminal displayed garbled text due to Windows encoding (cp950) |
 
-NHTSA returns all recalls for a vehicle; there is no server-side component filter. Client-side filtering is possible but brittle — the LLM would need to classify recall descriptions, which introduces another layer of potential error.
+#### Conflicting Constraints
+
+| Input | Observed Behavior |
+|-------|------------------|
+| `"Which SUVs have the most recalls in 2022?"` | ❌ LLM produced empty make/model, API returned 400 error instead of a clean out_of_scope message |
+| `"Best and worst safety rated car in 2022"` | ✅ Returned no results — silent failure, no out_of_scope error |
+| `"2022年最安全的車是哪台？"` | ✅ Returned no results — same silent failure |
+
+#### Languages Other Than English (Traditional Chinese)
+
+| Input | Observed Behavior |
+|-------|------------------|
+| `"Toyota Camry 2020 有哪些召回問題"` | ✅ Correctly identified as recalls query, returned results |
+| `"Toyota Camry 2020 煞車召回"` | ⚠️ Returned all recalls — component filter not supported |
+| `"那台 Accord 有什麼問題？"` | ❌ Error message garbled on Windows terminal |
+| `"2022年最安全的車是哪台？"` | ⚠️ Silent failure — no results, no explanation |
+| `"Hond Civ1c 2O19 的投訴"` | ✅ Typo corrected, correct results returned |
+
+---
+
+### Requirement 3 — Harden & Fix
+
+_To be completed after fixing identified bugs._
+
+---
+
+### Requirement 4 — Remaining Hard Cases
+
+_To be completed after hardening._
 
 ---
 
