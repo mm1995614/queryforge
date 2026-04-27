@@ -3,7 +3,8 @@ from rich.table import Table
 from rich.panel import Panel
 from rich import box
 
-console = Console()
+# force_terminal ensures Rich doesn't fall back to plain ASCII on Windows
+console = Console(force_terminal=True)
 
 
 def show_query(query: dict) -> None:
@@ -42,6 +43,14 @@ def show_results(endpoint: str, data: dict) -> None:
         _show_complaints(results)
     elif endpoint == "safetyRatings":
         _show_safety_ratings(results)
+
+
+def show_synthesis(text: str) -> None:
+    console.print(Panel(
+        text,
+        title="[green]Summary[/green]",
+        border_style="green",
+    ))
 
 
 def _show_recalls(results: list) -> None:

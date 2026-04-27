@@ -30,7 +30,8 @@ from src.query_generator import SYSTEM_PROMPT
 
 load_dotenv()
 
-console = Console()
+sys.stdout.reconfigure(encoding="utf-8")
+console = Console(force_terminal=True)
 
 MODELS = [
     {
@@ -109,47 +110,63 @@ def call_model(model: dict, nl_query: str) -> dict:
 
 # ── Scoring ────────────────────────────────────────────────────────────────────
 
+def score_single_query(pred: dict, gt: dict) -> dict:
+    fields = ["endpoint", "make", "model", "year"]
+    results = {}
+    for f in fields:
+        gt_val = gt.get(f, "").upper()
+        pred_val = str(pred.get(f, "")).upper()
+        results[f] = gt_val == pred_val
+    field_score = sum(results.values()) / len(fields)
+    return {"score": field_score, "fields": results, "correct": all(results.values())}
+
+
 def score(prediction: dict, ground_truth: dict) -> dict:
     """
     Field-level scoring.
 
     For error cases: correct if prediction also has 'error' with the same type.
+    For complex_constraints cases: ground_truth has 'queries' key; prediction must
+      also have 'queries' with matching sub-queries (order-based).
     For valid cases: 1 point per correct field (endpoint, make, model, year).
-    Returns {"score": float 0–1, "fields": {field: bool}, "correct": bool}
+    Returns {"score": float 0–1, "fields": {...}, "correct": bool}
     """
-    is_error_case = "error" in ground_truth
-
-    if is_error_case:
+    if "error" in ground_truth:
         correct = (
             "error" in prediction
             and prediction.get("error") == ground_truth.get("error")
         )
         return {"score": 1.0 if correct else 0.0, "fields": {"error": correct}, "correct": correct}
 
-    fields = ["endpoint", "make", "model", "year"]
-    results = {}
-    for f in fields:
-        gt_val = ground_truth.get(f, "").upper()
-        pred_val = str(prediction.get(f, "")).upper()
-        results[f] = gt_val == pred_val
+    if "queries" in ground_truth:
+        gt_queries = ground_truth["queries"]
+        pred_queries = prediction.get("queries", [])
+        if not isinstance(pred_queries, list) or len(pred_queries) == 0:
+            return {"score": 0.0, "fields": {"queries": False}, "correct": False}
+        sub_scores = []
+        for i, gt_q in enumerate(gt_queries):
+            pred_q = pred_queries[i] if i < len(pred_queries) else {}
+            sub_scores.append(score_single_query(pred_q, gt_q))
+        avg_score = sum(s["score"] for s in sub_scores) / len(sub_scores)
+        fully_correct = all(s["correct"] for s in sub_scores)
+        return {"score": avg_score, "fields": {"queries": fully_correct}, "correct": fully_correct}
 
-    field_score = sum(results.values()) / len(fields)
-    fully_correct = all(results.values())
-    return {"score": field_score, "fields": results, "correct": fully_correct}
+    return score_single_query(prediction, ground_truth)
 
 
 # ── Main eval loop ─────────────────────────────────────────────────────────────
 
-def run_eval() -> dict:
-    results = {m["id"]: {"model": m, "cases": [], "correct": 0, "total": 30} for m in MODELS}
+def run_eval(models=None) -> dict:
+    active = models if models is not None else MODELS
+    results = {m["id"]: {"model": m, "cases": [], "correct": 0, "total": 30} for m in active}
 
-    total = len(TEST_CASES) * len(MODELS)
+    total = len(TEST_CASES) * len(active)
     done = 0
 
-    console.print(f"\n[bold]Running evaluation: {len(TEST_CASES)} cases × {len(MODELS)} models[/bold]\n")
+    console.print(f"\n[bold]Running evaluation: {len(TEST_CASES)} cases × {len(active)} models[/bold]\n")
 
     for case in TEST_CASES:
-        for model in MODELS:
+        for model in active:
             console.print(
                 f"[dim][{done + 1}/{total}] {model['display']} — Case {case['id']}: {case['nl_query'][:50]}[/dim]"
             )
@@ -260,6 +277,12 @@ def save_results(results: dict) -> None:
 
 
 if __name__ == "__main__":
-    results = run_eval()
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--provider", nargs="+", help="Run only these providers (e.g. groq anthropic openai)")
+    args = parser.parse_args()
+
+    active_models = [m for m in MODELS if m["provider"] in args.provider] if args.provider else MODELS
+    results = run_eval(active_models)
     print_summary(results)
     save_results(results)
