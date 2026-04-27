@@ -37,13 +37,20 @@ git clone https://github.com/mm1995614/queryforge.git
 cd queryforge
 ```
 
-### 2. Install dependencies
+### 2. Create a virtual environment (recommended)
+
+```bash
+python -m venv .venv
+source .venv/bin/activate  # Windows: .venv\Scripts\activate
+```
+
+### 3. Install dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3. Configure API keys
+### 4. Configure API keys
 
 ```bash
 cp .env.example .env
