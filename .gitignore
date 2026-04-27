@@ -31,3 +31,7 @@ Thumbs.db
 
 # Assessment PDF
 *.pdf
+
+# Claude Code
+.claude/
+CLAUDE.md
