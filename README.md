@@ -345,9 +345,7 @@ API call 2 (per variant) → actual star ratings
 
 ### Requirement 1 — Data Generation
 
-30 natural language queries were **programmatically generated** using Groq (Llama 3.3 70B) via [`eval/generate_test_cases.py`](eval/generate_test_cases.py). The generation prompt specified exact category counts, adversarial requirements, and output schema — the model was not hand-held through each case.
-
-The initial generation produced 30 straightforward cases that all three models passed on the first eval run (Claude 90%, GPT 90%, Llama 87%). This revealed that the test set was too easy — the overall scores were inflated by simple cases. The set was redesigned with **10 simple baselines and 20 hard adversarial cases** to create a more discriminative benchmark.
+30 natural language queries were **programmatically generated** using Groq (Llama 3.3 70B) via [`eval/generate_test_cases.py`](eval/generate_test_cases.py). The generation prompt specified exact category counts, adversarial requirements, and output schema — the model was not hand-held through each case. The set was designed with **10 simple baselines and 20 hard adversarial cases** to create a discriminative benchmark that exposes meaningful capability differences between models.
 
 **Final category distribution:**
 

@@ -23,10 +23,10 @@
       "id": "llama-3.3-70b-versatile",
       "display": "Llama 3.3 70B (Groq)",
       "type": "open-weight",
-      "accuracy": 0.6333,
-      "correct": 19,
+      "accuracy": 0.8667,
+      "correct": 26,
       "total": 30,
-      "avg_field_score": 0.6333
+      "avg_field_score": 0.89
     }
   ]
 }
