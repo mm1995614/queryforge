@@ -455,6 +455,20 @@ The cases below illustrate the difficulty level. Each is genuinely hard — not 
 
 Full per-case results: [eval/results/summary.json](eval/results/summary.json)
 
+#### Prompt Versioning
+
+Each iteration of the system prompt is stored as a standalone file in [`prompts/`](prompts/), named by version:
+
+| File | Round | Active? |
+|------|-------|---------|
+| [`prompts/v0_baseline.txt`](prompts/v0_baseline.txt) | 0 | — |
+| [`prompts/v1_principle_rules.txt`](prompts/v1_principle_rules.txt) | 1 | — |
+| [`prompts/v2_checklist_enforcement.txt`](prompts/v2_checklist_enforcement.txt) | 2 | ✓ |
+
+`src/query_generator.py` has a `PROMPT_VERSION` constant that controls which file is loaded at runtime. Each eval run's results are saved to a correspondingly named file in `eval/results/` (e.g. `eval/results/v1_principle_rules.json`), so any result can be traced back to the exact prompt that produced it. Full version history with diffs and rationale: [`prompts/CHANGELOG.md`](prompts/CHANGELOG.md).
+
+---
+
 #### Prompt Iteration History
 
 Two rounds of prompt iteration were required before all three models reached >85%.
