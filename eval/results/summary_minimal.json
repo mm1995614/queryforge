@@ -1,0 +1,34 @@
+{
+  "prompt_version": "minimal_noharness",
+  "prompt_file": "prompts/minimal_noharness.txt",
+  "timestamp": "2026-06-21T16:34:58.734145",
+  "models": [
+    {
+      "id": "qwen2.5:7b-instruct",
+      "display": "Qwen2.5 7B (Local)",
+      "type": "local",
+      "accuracy": 0.3667,
+      "correct": 11,
+      "total": 30,
+      "avg_field_score": 0.425
+    },
+    {
+      "id": "llama3.1:8b",
+      "display": "Llama 3.1 8B (Local)",
+      "type": "local",
+      "accuracy": 0.2,
+      "correct": 6,
+      "total": 30,
+      "avg_field_score": 0.375
+    },
+    {
+      "id": "gemma2:9b",
+      "display": "Gemma 2 9B (Local)",
+      "type": "local",
+      "accuracy": 0.3667,
+      "correct": 11,
+      "total": 30,
+      "avg_field_score": 0.4417
+    }
+  ]
+}

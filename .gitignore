@@ -16,9 +16,10 @@ venv/
 .venv/
 env/
 
-# Eval results (raw outputs — keep only summary)
+# Eval results (raw outputs — keep only the summaries)
 eval/results/*.json
 !eval/results/summary.json
+!eval/results/summary_minimal.json
 
 # IDE
 .vscode/

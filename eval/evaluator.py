@@ -26,7 +26,14 @@ from rich import box
 # Allow imports from project root
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from eval.test_cases import TEST_CASES
-from src.query_generator import SYSTEM_PROMPT
+from src.query_generator import (
+    SYSTEM_PROMPT, MINIMAL_PROMPT, PROMPT_VERSION, MINIMAL_PROMPT_VERSION,
+)
+
+# Prompt variants for the before/after (no-harness vs with-harness) comparison.
+# Each maps to a versioned prompt file under prompts/ (see prompts/CHANGELOG.md).
+PROMPTS = {"full": SYSTEM_PROMPT, "minimal": MINIMAL_PROMPT}
+PROMPT_VERSIONS = {"full": PROMPT_VERSION, "minimal": MINIMAL_PROMPT_VERSION}
 
 load_dotenv()
 
@@ -52,51 +59,80 @@ MODELS = [
         "display": "Llama 3.3 70B (Groq)",
         "type": "open-weight",
     },
+    {
+        "id": "qwen2.5:7b-instruct",
+        "provider": "ollama",
+        "display": "Qwen2.5 7B (Local)",
+        "type": "local",
+    },
+    {
+        "id": "llama3.1:8b",
+        "provider": "ollama",
+        "display": "Llama 3.1 8B (Local)",
+        "type": "local",
+    },
+    {
+        "id": "gemma2:9b",
+        "provider": "ollama",
+        "display": "Gemma 2 9B (Local)",
+        "type": "local",
+    },
 ]
 
 # ── API clients ────────────────────────────────────────────────────────────────
+# Lazily constructed so a local-only run (--provider ollama) doesn't require the
+# cloud API keys to be present in .env. Each client is built on first use.
 
-_anthropic = anthropic.Anthropic()
-_openai = openai.OpenAI()
-_groq = Groq()
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+
+_clients: dict = {}
+
+
+def _client(provider: str):
+    if provider not in _clients:
+        if provider == "anthropic":
+            _clients[provider] = anthropic.Anthropic()
+        elif provider == "openai":
+            _clients[provider] = openai.OpenAI()
+        elif provider == "groq":
+            _clients[provider] = Groq()
+        elif provider == "ollama":
+            # Ollama exposes an OpenAI-compatible endpoint; no real key needed.
+            _clients[provider] = openai.OpenAI(
+                base_url=f"{OLLAMA_BASE_URL}/v1", api_key="ollama"
+            )
+        else:
+            raise ValueError(f"Unknown provider: {provider}")
+    return _clients[provider]
 
 
 # ── Inference ──────────────────────────────────────────────────────────────────
 
-def call_model(model: dict, nl_query: str) -> dict:
+def call_model(model: dict, nl_query: str, system_prompt: str = SYSTEM_PROMPT) -> dict:
     provider = model["provider"]
     model_id = model["id"]
 
     try:
         if provider == "anthropic":
-            resp = _anthropic.messages.create(
+            resp = _client(provider).messages.create(
                 model=model_id,
                 max_tokens=256,
-                system=SYSTEM_PROMPT,
+                system=system_prompt,
                 messages=[{"role": "user", "content": nl_query}],
             )
             text = next(b.text for b in resp.content if b.type == "text")
             return json.loads(text)
 
-        elif provider == "openai":
-            resp = _openai.chat.completions.create(
+        elif provider in ("openai", "groq", "ollama"):
+            # All three speak the OpenAI chat-completions API.
+            # For ollama, response_format json_object maps to Ollama's
+            # `format=json`, which forces syntactically valid JSON output.
+            resp = _client(provider).chat.completions.create(
                 model=model_id,
                 max_tokens=256,
                 response_format={"type": "json_object"},
                 messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": nl_query},
-                ],
-            )
-            return json.loads(resp.choices[0].message.content)
-
-        elif provider == "groq":
-            resp = _groq.chat.completions.create(
-                model=model_id,
-                max_tokens=256,
-                response_format={"type": "json_object"},
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": nl_query},
                 ],
             )
@@ -156,22 +192,29 @@ def score(prediction: dict, ground_truth: dict) -> dict:
 
 # ── Main eval loop ─────────────────────────────────────────────────────────────
 
-def run_eval(models=None) -> dict:
+def run_eval(models=None, system_prompt: str = SYSTEM_PROMPT, prompt_variant: str = "full") -> dict:
     active = models if models is not None else MODELS
     results = {m["id"]: {"model": m, "cases": [], "correct": 0, "total": 30} for m in active}
 
     total = len(TEST_CASES) * len(active)
     done = 0
 
-    console.print(f"\n[bold]Running evaluation: {len(TEST_CASES)} cases × {len(active)} models[/bold]\n")
+    console.print(
+        f"\n[bold]Running evaluation: {len(TEST_CASES)} cases × {len(active)} models "
+        f"(prompt: {prompt_variant})[/bold]\n"
+    )
 
-    for case in TEST_CASES:
-        for model in active:
+    # Model-outer loop: each model runs all 30 cases before moving on. This keeps
+    # a local (ollama) model resident in VRAM for its whole pass instead of being
+    # swapped in/out on every case — critical on a small GPU that can hold only
+    # one ~5GB model at a time.
+    for model in active:
+        for case in TEST_CASES:
             console.print(
                 f"[dim][{done + 1}/{total}] {model['display']} — Case {case['id']}: {case['nl_query'][:50]}[/dim]"
             )
 
-            output = call_model(model, case["nl_query"])
+            output = call_model(model, case["nl_query"], system_prompt)
             result = score(output, case["ground_truth"])
 
             if result["correct"]:
@@ -187,9 +230,12 @@ def run_eval(models=None) -> dict:
             })
 
             done += 1
-            # Groq free tier rate limit: stay under 30 req/min
+            # Groq free tier rate limit: stay under 30 req/min.
+            # Local (ollama) models have no rate limit — don't sleep.
             if model["provider"] == "groq":
                 time.sleep(2)
+            elif model["provider"] == "ollama":
+                pass
             else:
                 time.sleep(0.3)
 
@@ -224,13 +270,14 @@ def print_summary(results: dict) -> None:
     console.print("\n")
     console.print(table)
 
-    # Per-category breakdown
+    # Per-category breakdown — use the models actually present in results so
+    # columns and rows stay aligned when running a subset (e.g. --provider ollama).
     console.print("\n[bold]Accuracy by category:[/bold]\n")
     categories = sorted({c["category"] for c in TEST_CASES})
     cat_table = Table(box=box.SIMPLE, header_style="bold")
     cat_table.add_column("Category", width=25)
-    for m in MODELS:
-        cat_table.add_column(m["display"][:18], width=20)
+    for data in results.values():
+        cat_table.add_column(data["model"]["display"][:18], width=20)
 
     for cat in categories:
         cat_cases = [c for c in TEST_CASES if c["category"] == cat]
@@ -246,16 +293,51 @@ def print_summary(results: dict) -> None:
     console.print(cat_table)
 
 
-def save_results(results: dict) -> None:
-    summary = {
-        "timestamp": datetime.now().isoformat(),
-        "models": [],
-    }
+def _read_json_safe(path: Path):
+    """Read a JSON file, tolerating legacy non-UTF-8 files.
+
+    Older result files were written without an explicit encoding and ended up in
+    the Windows default (cp950) when they contained Chinese text. Fall back to
+    cp950, then to a lossy read, so merging never crashes on a stale file.
+    """
+    for enc in ("utf-8", "cp950"):
+        try:
+            return json.loads(path.read_text(encoding=enc))
+        except UnicodeDecodeError:
+            continue
+        except (json.JSONDecodeError, OSError):
+            return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def save_results(results: dict, prompt_variant: str = "full") -> None:
+    # "full" (with-harness) is the canonical results file that holds all models
+    # (cloud + local). "minimal" (no-harness baseline) is kept in a separate file
+    # so the before/after comparison doesn't overwrite itself.
+    suffix = "" if prompt_variant == "full" else f"_{prompt_variant}"
+    results_dir = Path(__file__).parent / "results"
+    out_path = results_dir / f"summary{suffix}.json"
+
+    # Merge with any existing summary so a partial run (e.g. --provider ollama)
+    # appends to / updates prior results rather than discarding the other models.
+    existing_models: list = []
+    if out_path.exists():
+        prior = _read_json_safe(out_path)
+        if prior:
+            existing_models = prior.get("models", [])
+
+    by_id = {m["id"]: m for m in existing_models}
+    # Preserve the original ordering from MODELS so the table reads cloud → local.
+    order = [m["id"] for m in MODELS]
+
     for model_id, data in results.items():
         m = data["model"]
         correct = data["correct"]
         total = data["total"]
-        summary["models"].append({
+        by_id[model_id] = {
             "id": model_id,
             "display": m["display"],
             "type": m["type"],
@@ -265,24 +347,48 @@ def save_results(results: dict) -> None:
             "avg_field_score": round(
                 sum(c["score"] for c in data["cases"]) / total, 4
             ),
-        })
+        }
 
-    out_path = Path(__file__).parent / "results" / "summary.json"
-    out_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False))
+    merged = [by_id[i] for i in order if i in by_id]
+    merged += [m for mid, m in by_id.items() if mid not in order]  # any unknown ids last
+
+    # Record which prompt produced these results (matches the prompts/ versioning).
+    version = PROMPT_VERSIONS.get(prompt_variant, prompt_variant)
+    summary = {
+        "prompt_version": version,
+        "prompt_file": f"prompts/{version}.txt",
+        "timestamp": datetime.now().isoformat(),
+        "models": merged,
+    }
+    out_path.write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
     console.print(f"\n[green]Results saved to {out_path}[/green]")
 
-    # Also save full per-case results
-    full_path = Path(__file__).parent / "results" / "full_results.json"
-    full_path.write_text(json.dumps(results, indent=2, ensure_ascii=False, default=str))
+    # Full per-case results: merge by model id too (keep prior models' detail).
+    full_path = results_dir / f"full_results{suffix}.json"
+    full_existing: dict = {}
+    if full_path.exists():
+        prior_full = _read_json_safe(full_path)
+        if isinstance(prior_full, dict):
+            full_existing = prior_full
+    full_existing.update(results)
+    full_path.write_text(
+        json.dumps(full_existing, indent=2, ensure_ascii=False, default=str), encoding="utf-8"
+    )
 
 
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--provider", nargs="+", help="Run only these providers (e.g. groq anthropic openai)")
+    parser.add_argument("--provider", nargs="+", help="Run only these providers (e.g. groq anthropic openai ollama)")
+    parser.add_argument(
+        "--prompt", choices=["full", "minimal"], default="full",
+        help="Which system prompt to use: 'full' (with-harness, engineered) or "
+             "'minimal' (no-harness baseline). Results save to separate files.",
+    )
     args = parser.parse_args()
 
     active_models = [m for m in MODELS if m["provider"] in args.provider] if args.provider else MODELS
-    results = run_eval(active_models)
+    system_prompt = PROMPTS[args.prompt]
+    results = run_eval(active_models, system_prompt=system_prompt, prompt_variant=args.prompt)
     print_summary(results)
-    save_results(results)
+    save_results(results, prompt_variant=args.prompt)

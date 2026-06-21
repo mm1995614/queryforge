@@ -22,9 +22,10 @@ A CLI tool that translates natural language into structured [NHTSA](https://www.
 |-----------|-----------|
 | Language | Python 3.12 |
 | CLI framework | Typer + Rich |
-| Query generation | Llama 3.3 70B (Groq, free tier) |
+| Query generation | Llama 3.3 70B (Groq, free tier) — switchable to a local model via `QUERYFORGE_PROVIDER` |
 | Data source | NHTSA Public API (no auth required) |
-| Eval models | Claude Sonnet 4.6, GPT-4o-mini, Llama 3.3 70B (Groq) |
+| Eval models (cloud) | Claude Sonnet 4.6, GPT-4o-mini, Llama 3.3 70B (Groq) |
+| Eval models (local) | Qwen2.5 7B, Llama 3.1 8B, Gemma 2 9B — via [Ollama](https://ollama.com), runs fully offline |
 
 ---
 
@@ -81,6 +82,22 @@ python cli.py "2019 Honda Civic 消費者投訴"
 python cli.py "What are the crash test ratings for Ford F-150 2022?"
 python cli.py "Ford F-150 2022 安全評等"
 ```
+
+### Running fully offline on a local model
+
+The query generator defaults to Llama 3.3 70B on Groq (cloud). To run the LLM step
+entirely on-device — no data leaves the machine — point it at a local [Ollama](https://ollama.com)
+model via two environment variables:
+
+```bash
+# Windows PowerShell
+$env:QUERYFORGE_PROVIDER = "ollama"
+$env:QUERYFORGE_MODEL    = "qwen2.5:7b-instruct"
+python cli.py "Toyota Camry 2020 有哪些召回問題"
+```
+
+`QUERYFORGE_PROVIDER` accepts `groq` (default), `openai`, or `ollama`. This makes the tool
+deployable in privacy-sensitive, on-prem environments where queries must never reach a cloud API.
 
 ---
 
@@ -439,21 +456,105 @@ The cases below illustrate the difficulty level. Each is genuinely hard — not 
 
 #### Models Evaluated
 
-| Model | Type | Provider |
-|-------|------|---------|
-| `claude-sonnet-4-6` | closed-source | Anthropic |
-| `gpt-4o-mini` | closed-source | OpenAI |
-| `llama-3.3-70b-versatile` | open-weight | Groq (free tier) |
+| Model | Type | Provider | Runs where |
+|-------|------|---------|-----------|
+| `claude-sonnet-4-6` | closed-source | Anthropic | Cloud |
+| `gpt-4o-mini` | closed-source | OpenAI | Cloud |
+| `llama-3.3-70b-versatile` | open-weight | Groq (free tier) | Cloud |
+| `qwen2.5:7b-instruct` | local | Ollama | On-device |
+| `llama3.1:8b` | local | Ollama | On-device |
+| `gemma2:9b` | local | Ollama | On-device |
 
-#### Final Results
+The three local models were added to answer a practical question for privacy-sensitive,
+on-prem deployments: **how close can a quantized 7–9B model running on a single consumer
+GPU get to a frontier cloud model on this task?** They were run through the
+exact same 30-case harness, with no per-model prompt tuning.
 
-| Model | Accuracy | Avg Field Score | >85%? |
-|-------|----------|----------------|-------|
-| claude-sonnet-4-6 | 30/30 (100%) | 1.00 | ✓ |
-| gpt-4o-mini | 27/30 (90%) | 0.90 | ✓ |
-| llama-3.3-70b-versatile | 26/30 (87%) | 0.89 | ✓ |
+#### Local Test Hardware — and why 7–9B
+
+These local runs were done on a **consumer desktop**, deliberately, to test the cheapest
+plausible on-prem setup rather than datacenter hardware:
+
+| Component | Spec |
+|-----------|------|
+| GPU | NVIDIA GeForce GTX 1060 — **6 GB VRAM** |
+| CPU | Intel Core i5-9400F (6 cores) |
+| RAM | 16 GB |
+| OS | Windows 10 |
+| Runtime | Ollama (models quantized to Q4_K_M) |
+
+**Why the models are capped at 7–9B:** a Q4-quantized 7–9B model weighs ~4.7–5.4 GB and just
+fits in 6 GB of VRAM alongside the context window. A 13B+ model does not fit and would spill to
+CPU, making it impractically slow. The 6 GB card is therefore the *hard constraint* that defines
+this model class — not a preference. (Gemma 2 9B at 5.4 GB already partially offloads to CPU and
+runs noticeably slower than the 7–8B models.)
+
+**Why these three specific models** — one strong instruction-tuned model from each of the three
+most relevant open-weight families, so the comparison is broad rather than three flavours of the
+same thing:
+
+| Model | Why it was chosen |
+|-------|-------------------|
+| **Qwen2.5 7B** | Strongest Chinese-language open model in this size class — directly relevant because the real target users query in Traditional Chinese. |
+| **Gemma 2 9B** | Google's open-weight model; relevant when the broader stack already leans on Google Cloud / Vertex AI, and useful as a "what does Google's model give us locally" data point. |
+| **Llama 3.1 8B** | Same family as the cloud `llama-3.3-70b` already in the eval — gives a clean **8B-local vs 70B-cloud** apples-to-apples comparison within one model lineage. |
+
+#### Final Results (with-harness, i.e. the full engineered prompt)
+
+| Model | Type | Accuracy | Avg Field Score | >85%? |
+|-------|------|----------|----------------|-------|
+| claude-sonnet-4-6 | closed-source | 30/30 (100%) | 1.00 | ✓ |
+| gpt-4o-mini | closed-source | 27/30 (90%) | 0.90 | ✓ |
+| llama-3.3-70b-versatile | open-weight | 26/30 (87%) | 0.89 | ✓ |
+| **qwen2.5:7b** | **local** | **25/30 (83%)** | **0.83** | **✗** |
+| **gemma2:9b** | **local** | **22/30 (73%)** | **0.76** | **✗** |
+| **llama3.1:8b** | **local** | **19/30 (63%)** | **0.67** | **✗** |
 
 Full per-case results: [eval/results/summary.json](eval/results/summary.json)
+
+> **The 85% threshold and local models.** The assessment's >85% bar was reached by all three
+> *cloud* models through prompt iteration. None of the three *local* 7–9B models clear it on the
+> same cloud-tuned prompt — Qwen2.5 7B comes closest at 83% (one case short of 26/30). This gap
+> is itself the finding: the prompt that makes frontier models pass does **not** fully transfer
+> down to small local models. See the before/after analysis below.
+
+#### Harness Engineering: Before vs After (local models)
+
+To isolate how much of the score comes from the **base model** versus the **prompt scaffolding
+wrapped around it**, each local model was run twice on the same 30 cases:
+
+- **No harness** — a bare prompt (`MINIMAL_PROMPT`): task + JSON schema only, no rules.
+- **With harness** — the full engineered `SYSTEM_PROMPT` (all the Part 1 hardening rules).
+
+| Local model | No harness | With harness | Lift |
+|-------------|-----------|--------------|------|
+| Qwen2.5 7B | 11/30 (37%) | 25/30 (83%) | **+46 pts** |
+| Gemma 2 9B | 11/30 (37%) | 22/30 (73%) | **+37 pts** |
+| Llama 3.1 8B | 6/30 (20%) | 19/30 (63%) | **+43 pts** |
+
+The engineered prompt roughly **doubles** each local model's accuracy. The clearest signal is in
+the *hard* categories: with the bare prompt, every local model scored **0/4 on every missing-parameter
+and out-of-scope category** and **0/2 on multi-query fan-out** — the raw models cannot detect a
+missing year, refuse an out-of-scope question, or split a multi-part query on their own. Those
+behaviours come almost entirely from the prompt scaffolding, not the weights.
+
+This is the concrete demonstration of what the prompt layer (prompt engineering / scaffolding) buys
+you, and the **eval harness** — the fixed 30-case set + field scorer in `eval/` — is what makes the
++37 to +46 point lift measurable rather than anecdotal. The two are different things: the harness
+*measures*, the prompt *improves*.
+
+Baseline (no-harness) per-model results: [eval/results/summary_minimal.json](eval/results/summary_minimal.json)
+
+#### Cloud vs Local — where the gap remains (with-harness)
+
+Even with the full harness, the local models share a common residual weakness and differ on the rest:
+
+- **Missing-year detection is the hardest remaining category for every local model** (`hard_error_missing_year`: Qwen 1/4, Gemma 1/4, Llama 3.1 0/4). Like the cloud models in Round 0, the small models still invent a plausible year rather than returning `missing_year` — but unlike the frontier models, the checklist-style "YEAR CHECK" rule only partially corrects them. The instruction-following needed to *reliably refuse* is where 7–9B local weights fall short of frontier weights.
+- **Qwen2.5 7B is the strongest local model (83%)** and the only one that handled the stacked typo+Chinese `hard_adversarial_mixed` cases (4/4) — consistent with its stronger Chinese training. For an on-prem deployment serving Chinese-language users, it is the clear pick.
+- **Gemma 2 9B (73%)** — Google's model — was solid on noise/typo normalization but weakest on out-of-scope detection (0/1 simple, 3/4 hard), tending to answer comparative questions instead of refusing.
+- **Llama 3.1 8B (63%)** was the weakest, collapsing on the mixed adversarial cases (0/4) where Chinese keywords and typos stack — the same multilingual brittleness, amplified at 8B vs the 70B cloud version.
+
+**Takeaway for on-prem AI:** a quantized 7B model on a 6GB consumer GPU reaches ~83% of a frontier model's behaviour on this structured-extraction task *once wrapped in a well-engineered prompt* — promising, but the last ~15 points (especially "refuse when data is missing") need either a larger local model, per-model prompt tuning, or a deterministic guardrail outside the LLM.
 
 #### Prompt Versioning
 
@@ -463,7 +564,8 @@ Each iteration of the system prompt is stored as a standalone file in [`prompts/
 |------|-------|---------|
 | [`prompts/v0_baseline.txt`](prompts/v0_baseline.txt) | 0 | — |
 | [`prompts/v1_principle_rules.txt`](prompts/v1_principle_rules.txt) | 1 | — |
-| [`prompts/v2_checklist_enforcement.txt`](prompts/v2_checklist_enforcement.txt) | 2 | ✓ |
+| [`prompts/v2_checklist_enforcement.txt`](prompts/v2_checklist_enforcement.txt) | 2 | ✓ (with-harness) |
+| [`prompts/minimal_noharness.txt`](prompts/minimal_noharness.txt) | — | no-harness baseline |
 
 `src/query_generator.py` has a `PROMPT_VERSION` constant that controls which file is loaded at runtime. Each eval run's results are saved to a correspondingly named file in `eval/results/` (e.g. `eval/results/v1_principle_rules.json`), so any result can be traced back to the exact prompt that produced it. Full version history with diffs and rationale: [`prompts/CHANGELOG.md`](prompts/CHANGELOG.md).
 
@@ -559,6 +661,10 @@ The checklist framing dramatically improved Llama's year detection (1/4 → 4/4)
 ### Requirement 5 — Write-up
 
 #### Model Selection
+
+> This section covers the **original three cloud models** of the assessment. Three **local** models
+> (Qwen2.5 7B, Gemma 2 9B, Llama 3.1 8B) were added later to test on-prem feasibility — their
+> selection rationale and hardware constraints are in [Local Test Hardware — and why 7–9B](#local-test-hardware--and-why-79b) above.
 
 Three models were chosen to represent distinct points on the capability-cost-openness spectrum:
 
