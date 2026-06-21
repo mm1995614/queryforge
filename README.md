@@ -504,7 +504,7 @@ same thing:
 | Model | Type | Accuracy | Avg Field Score | >85%? |
 |-------|------|----------|----------------|-------|
 | claude-sonnet-4-6 | closed-source | 30/30 (100%) | 1.00 | ✓ |
-| gpt-4o-mini | closed-source | 27/30 (90%) | 0.90 | ✓ |
+| gpt-4o-mini | closed-source | 28/30 (93%) | 0.93 | ✓ |
 | llama-3.3-70b-versatile | open-weight | 26/30 (87%) | 0.89 | ✓ |
 | **qwen2.5:7b** | **local** | **23/30 (77%)** | **0.79** | **✗** |
 | **gemma2:9b** | **local** | **22/30 (73%)** | **0.76** | **✗** |
@@ -512,8 +512,10 @@ same thing:
 
 Full per-case results: [eval/results/summary.json](eval/results/summary.json)
 
-> All runs use **temperature = 0 (greedy decoding)**, so scores are deterministic and reproducible —
-> re-running the eval yields the same numbers rather than drifting run-to-run.
+> All six models here are run at **temperature = 0 (greedy decoding)**, so scores are deterministic
+> and reproducible — re-running the eval yields the same numbers rather than drifting run-to-run.
+> (The Round 0/1/2 tables in *Prompt Iteration History* below are the original prompt-development
+> runs at default temperature, kept as a historical record of how the prompt was iterated.)
 
 > **The 85% threshold and local models.** The assessment's >85% bar was reached by all three
 > *cloud* models through prompt iteration. None of the three *local* 7–9B models clear it on the
