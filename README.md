@@ -499,7 +499,7 @@ same thing:
 | **Gemma 2 9B** | Google's open-weight model; relevant when the broader stack already leans on Google Cloud / Vertex AI, and useful as a "what does Google's model give us locally" data point. |
 | **Llama 3.1 8B** | Same family as the cloud `llama-3.3-70b` already in the eval — gives a clean **8B-local vs 70B-cloud** apples-to-apples comparison within one model lineage. |
 
-#### Final Results (with-harness, i.e. the full engineered prompt)
+#### Final Results (with the full engineered prompt)
 
 | Model | Type | Accuracy | Avg Field Score | >85%? |
 |-------|------|----------|----------------|-------|
@@ -523,15 +523,17 @@ Full per-case results: [eval/results/summary.json](eval/results/summary.json)
 > needed for 85%). This gap is itself the finding: the prompt that makes frontier models pass does
 > **not** fully transfer down to small local models. See the before/after analysis below.
 
-#### Harness Engineering: Before vs After (local models)
+#### Prompt Engineering: Before vs After (measured by the harness)
 
-To isolate how much of the score comes from the **base model** versus the **prompt scaffolding
-wrapped around it**, each local model was run twice on the same 30 cases:
+To isolate how much of the score comes from the **base model** versus the **prompt engineering
+wrapped around it**, each local model was run twice on the same 30 cases. (Note: this is *prompt
+engineering* — the harness is the eval rig that *measures* the difference; the prompt is what
+*produces* it.)
 
-- **No harness** — a bare prompt (`MINIMAL_PROMPT`): task + JSON schema only, no rules.
-- **With harness** — the full engineered `SYSTEM_PROMPT` (all the Part 1 hardening rules).
+- **Bare prompt** (`MINIMAL_PROMPT`): task + JSON schema only, no rules — i.e. no prompt engineering.
+- **Engineered prompt** (`SYSTEM_PROMPT`): the full hardening rules from Part 1.
 
-| Local model | No harness | With harness | Lift |
+| Local model | Bare prompt | Engineered prompt | Lift |
 |-------------|-----------|--------------|------|
 | Qwen2.5 7B | 11/30 (37%) | 23/30 (77%) | **+40 pts** |
 | Gemma 2 9B | 11/30 (37%) | 22/30 (73%) | **+37 pts** |
@@ -548,11 +550,11 @@ you, and the **eval harness** — the fixed 30-case set + field scorer in `eval/
 ~+40 point lift measurable rather than anecdotal. The two are different things: the harness
 *measures*, the prompt *improves*.
 
-Baseline (no-harness) per-model results: [eval/results/summary_minimal.json](eval/results/summary_minimal.json)
+Baseline (bare-prompt) per-model results: [eval/results/summary_minimal.json](eval/results/summary_minimal.json)
 
-#### Cloud vs Local — where the gap remains (with-harness)
+#### Cloud vs Local — where the gap remains (with the engineered prompt)
 
-Even with the full harness, the local models share two common residual weaknesses and differ on the rest:
+Even with the full engineered prompt, the local models share two common residual weaknesses and differ on the rest:
 
 - **Missing-year refusal is the hardest category for every local model** (`hard_error_missing_year`: Qwen 1/4, Llama 3.1 1/4, Gemma 0/4). Like the cloud models in Round 0, the small models still invent a plausible year rather than returning `missing_year` — and unlike the frontier models, the checklist-style "YEAR CHECK" rule only partially corrects them. The instruction-following needed to *reliably refuse* is where 7–9B local weights fall short of frontier weights.
 - **Stacked adversarial inputs also break all of them** (`hard_adversarial_mixed` — typo + Chinese keyword + missing field at once: Qwen 1/4, Gemma 2/4, Llama 3.1 0/4). Handling any one challenge is fine; three at once causes a skipped check.
@@ -570,8 +572,8 @@ Each iteration of the system prompt is stored as a standalone file in [`prompts/
 |------|-------|---------|
 | [`prompts/v0_baseline.txt`](prompts/v0_baseline.txt) | 0 | — |
 | [`prompts/v1_principle_rules.txt`](prompts/v1_principle_rules.txt) | 1 | — |
-| [`prompts/v2_checklist_enforcement.txt`](prompts/v2_checklist_enforcement.txt) | 2 | ✓ (with-harness) |
-| [`prompts/minimal_noharness.txt`](prompts/minimal_noharness.txt) | — | no-harness baseline |
+| [`prompts/v2_checklist_enforcement.txt`](prompts/v2_checklist_enforcement.txt) | 2 | ✓ (engineered) |
+| [`prompts/minimal_noharness.txt`](prompts/minimal_noharness.txt) | — | bare-prompt baseline |
 
 `src/query_generator.py` has a `PROMPT_VERSION` constant that controls which file is loaded at runtime. Each eval run's results are saved to a correspondingly named file in `eval/results/` (e.g. `eval/results/v1_principle_rules.json`), so any result can be traced back to the exact prompt that produced it. Full version history with diffs and rationale: [`prompts/CHANGELOG.md`](prompts/CHANGELOG.md).
 
