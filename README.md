@@ -506,17 +506,20 @@ same thing:
 | claude-sonnet-4-6 | closed-source | 30/30 (100%) | 1.00 | ✓ |
 | gpt-4o-mini | closed-source | 27/30 (90%) | 0.90 | ✓ |
 | llama-3.3-70b-versatile | open-weight | 26/30 (87%) | 0.89 | ✓ |
-| **qwen2.5:7b** | **local** | **25/30 (83%)** | **0.83** | **✗** |
+| **qwen2.5:7b** | **local** | **23/30 (77%)** | **0.79** | **✗** |
 | **gemma2:9b** | **local** | **22/30 (73%)** | **0.76** | **✗** |
-| **llama3.1:8b** | **local** | **19/30 (63%)** | **0.67** | **✗** |
+| **llama3.1:8b** | **local** | **18/30 (60%)** | **0.62** | **✗** |
 
 Full per-case results: [eval/results/summary.json](eval/results/summary.json)
 
+> All runs use **temperature = 0 (greedy decoding)**, so scores are deterministic and reproducible —
+> re-running the eval yields the same numbers rather than drifting run-to-run.
+
 > **The 85% threshold and local models.** The assessment's >85% bar was reached by all three
 > *cloud* models through prompt iteration. None of the three *local* 7–9B models clear it on the
-> same cloud-tuned prompt — Qwen2.5 7B comes closest at 83% (one case short of 26/30). This gap
-> is itself the finding: the prompt that makes frontier models pass does **not** fully transfer
-> down to small local models. See the before/after analysis below.
+> same cloud-tuned prompt — Qwen2.5 7B comes closest at 77% (23/30, three short of the 26/30
+> needed for 85%). This gap is itself the finding: the prompt that makes frontier models pass does
+> **not** fully transfer down to small local models. See the before/after analysis below.
 
 #### Harness Engineering: Before vs After (local models)
 
@@ -528,9 +531,9 @@ wrapped around it**, each local model was run twice on the same 30 cases:
 
 | Local model | No harness | With harness | Lift |
 |-------------|-----------|--------------|------|
-| Qwen2.5 7B | 11/30 (37%) | 25/30 (83%) | **+46 pts** |
+| Qwen2.5 7B | 11/30 (37%) | 23/30 (77%) | **+40 pts** |
 | Gemma 2 9B | 11/30 (37%) | 22/30 (73%) | **+37 pts** |
-| Llama 3.1 8B | 6/30 (20%) | 19/30 (63%) | **+43 pts** |
+| Llama 3.1 8B | 7/30 (23%) | 18/30 (60%) | **+37 pts** |
 
 The engineered prompt roughly **doubles** each local model's accuracy. The clearest signal is in
 the *hard* categories: with the bare prompt, every local model scored **0/4 on every missing-parameter
@@ -540,21 +543,22 @@ behaviours come almost entirely from the prompt scaffolding, not the weights.
 
 This is the concrete demonstration of what the prompt layer (prompt engineering / scaffolding) buys
 you, and the **eval harness** — the fixed 30-case set + field scorer in `eval/` — is what makes the
-+37 to +46 point lift measurable rather than anecdotal. The two are different things: the harness
+~+40 point lift measurable rather than anecdotal. The two are different things: the harness
 *measures*, the prompt *improves*.
 
 Baseline (no-harness) per-model results: [eval/results/summary_minimal.json](eval/results/summary_minimal.json)
 
 #### Cloud vs Local — where the gap remains (with-harness)
 
-Even with the full harness, the local models share a common residual weakness and differ on the rest:
+Even with the full harness, the local models share two common residual weaknesses and differ on the rest:
 
-- **Missing-year detection is the hardest remaining category for every local model** (`hard_error_missing_year`: Qwen 1/4, Gemma 1/4, Llama 3.1 0/4). Like the cloud models in Round 0, the small models still invent a plausible year rather than returning `missing_year` — but unlike the frontier models, the checklist-style "YEAR CHECK" rule only partially corrects them. The instruction-following needed to *reliably refuse* is where 7–9B local weights fall short of frontier weights.
-- **Qwen2.5 7B is the strongest local model (83%)** and the only one that handled the stacked typo+Chinese `hard_adversarial_mixed` cases (4/4) — consistent with its stronger Chinese training. For an on-prem deployment serving Chinese-language users, it is the clear pick.
-- **Gemma 2 9B (73%)** — Google's model — was solid on noise/typo normalization but weakest on out-of-scope detection (0/1 simple, 3/4 hard), tending to answer comparative questions instead of refusing.
-- **Llama 3.1 8B (63%)** was the weakest, collapsing on the mixed adversarial cases (0/4) where Chinese keywords and typos stack — the same multilingual brittleness, amplified at 8B vs the 70B cloud version.
+- **Missing-year refusal is the hardest category for every local model** (`hard_error_missing_year`: Qwen 1/4, Llama 3.1 1/4, Gemma 0/4). Like the cloud models in Round 0, the small models still invent a plausible year rather than returning `missing_year` — and unlike the frontier models, the checklist-style "YEAR CHECK" rule only partially corrects them. The instruction-following needed to *reliably refuse* is where 7–9B local weights fall short of frontier weights.
+- **Stacked adversarial inputs also break all of them** (`hard_adversarial_mixed` — typo + Chinese keyword + missing field at once: Qwen 1/4, Gemma 2/4, Llama 3.1 0/4). Handling any one challenge is fine; three at once causes a skipped check.
+- **Qwen2.5 7B is the strongest local model (77%)** — perfect on `hard_error_missing_make` (4/4) and noise normalization (4/4). For an on-prem deployment serving Chinese-language users, it is the clear pick.
+- **Gemma 2 9B (73%)** — Google's model — was solid on noise/typo normalization and best of the locals on the stacked-adversarial cases (2/4), but it was the weakest on missing-year refusal (0/4).
+- **Llama 3.1 8B (60%)** was the weakest, collapsing on the stacked adversarial cases (0/4) and noise stripping (0/1) — the same multilingual brittleness, amplified at 8B vs the 70B cloud version.
 
-**Takeaway for on-prem AI:** a quantized 7B model on a 6GB consumer GPU reaches ~83% of a frontier model's behaviour on this structured-extraction task *once wrapped in a well-engineered prompt* — promising, but the last ~15 points (especially "refuse when data is missing") need either a larger local model, per-model prompt tuning, or a deterministic guardrail outside the LLM.
+**Takeaway for on-prem AI:** a quantized 7B model on a 6GB consumer GPU reaches ~77% of a frontier model's behaviour on this structured-extraction task *once wrapped in a well-engineered prompt* — promising, but the last ~20 points (especially "refuse when data is missing") need either a larger local model, per-model prompt tuning, or a deterministic guardrail outside the LLM.
 
 #### Prompt Versioning
 

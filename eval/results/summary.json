@@ -1,7 +1,7 @@
 {
   "prompt_version": "v2_checklist_enforcement",
   "prompt_file": "prompts/v2_checklist_enforcement.txt",
-  "timestamp": "2026-06-21T16:44:10.602287",
+  "timestamp": "2026-06-21T18:48:42.716400",
   "models": [
     {
       "id": "claude-sonnet-4-6",
@@ -34,19 +34,19 @@
       "id": "qwen2.5:7b-instruct",
       "display": "Qwen2.5 7B (Local)",
       "type": "local",
-      "accuracy": 0.8333,
-      "correct": 25,
+      "accuracy": 0.7667,
+      "correct": 23,
       "total": 30,
-      "avg_field_score": 0.8333
+      "avg_field_score": 0.7917
     },
     {
       "id": "llama3.1:8b",
       "display": "Llama 3.1 8B (Local)",
       "type": "local",
-      "accuracy": 0.6333,
-      "correct": 19,
+      "accuracy": 0.6,
+      "correct": 18,
       "total": 30,
-      "avg_field_score": 0.6667
+      "avg_field_score": 0.625
     },
     {
       "id": "gemma2:9b",

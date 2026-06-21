@@ -108,6 +108,11 @@ def _client(provider: str):
 
 # ── Inference ──────────────────────────────────────────────────────────────────
 
+# Greedy decoding (temperature=0) so the eval is deterministic and reproducible —
+# scores don't drift run-to-run. Important for results used in decision-making.
+TEMPERATURE = 0
+
+
 def call_model(model: dict, nl_query: str, system_prompt: str = SYSTEM_PROMPT) -> dict:
     provider = model["provider"]
     model_id = model["id"]
@@ -117,6 +122,7 @@ def call_model(model: dict, nl_query: str, system_prompt: str = SYSTEM_PROMPT) -
             resp = _client(provider).messages.create(
                 model=model_id,
                 max_tokens=256,
+                temperature=TEMPERATURE,
                 system=system_prompt,
                 messages=[{"role": "user", "content": nl_query}],
             )
@@ -130,6 +136,7 @@ def call_model(model: dict, nl_query: str, system_prompt: str = SYSTEM_PROMPT) -
             resp = _client(provider).chat.completions.create(
                 model=model_id,
                 max_tokens=256,
+                temperature=TEMPERATURE,
                 response_format={"type": "json_object"},
                 messages=[
                     {"role": "system", "content": system_prompt},
